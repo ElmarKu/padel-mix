@@ -6,14 +6,18 @@
 <title>PadelMix</title>
 <link rel="stylesheet" href="style.css" />
 <link rel="manifest" href="manifest.json" />
+<link rel="icon" type="image/svg+xml" href="icons/icon.svg" />
+<link rel="icon" type="image/png" sizes="32x32" href="icons/icon-32.png" />
+<link rel="apple-touch-icon" href="icons/icon-180.png" />
 <meta name="theme-color" content="#1b6e5c" />
 </head>
 <body>
 <header class="topbar">
   <span class="brand">🎾 PadelMix</span>
   <nav>
-    <button id="nav-home">Home</button>
-    <button id="nav-standings">Standings</button>
+    <button id="nav-home" aria-label="Home" title="Home">🏠</button>
+    <button id="nav-standings" aria-label="Standings" title="Standings">🏆</button>
+    <button id="nav-history" aria-label="History" title="History">📈</button>
   </nav>
 </header>
 
@@ -21,6 +25,7 @@
   <section id="screen-setup" class="screen"></section>
   <section id="screen-round" class="screen"></section>
   <section id="screen-standings" class="screen"></section>
+  <section id="screen-history" class="screen"></section>
 </main>
 
 <script type="module" src="js/app.js"></script>
