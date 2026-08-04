@@ -28,7 +28,7 @@ function clamp(n, min, max) {
 function computeStandings(session) {
   const stats = {};
   session.playerIds.forEach((id) => {
-    stats[id] = { id, name: getName(id), points: 0, roundsPlayed: 0, wins: 0 };
+    stats[id] = { id, name: getName(id), gamePts: 0, bonusPts: 0, points: 0, roundsPlayed: 0, wins: 0 };
   });
   session.rounds.forEach((round) => {
     round.courts.forEach((court) => {
@@ -37,25 +37,60 @@ function computeStandings(session) {
       const bWin = court.scoreB > court.scoreA;
       court.teamA.forEach((id) => {
         if (!stats[id]) return;
-        stats[id].points += court.scoreA + (aWin ? session.winBonus : 0);
+        const bonus = aWin ? session.winBonus : 0;
+        stats[id].gamePts += court.scoreA;
+        stats[id].bonusPts += bonus;
+        stats[id].points += court.scoreA + bonus;
         stats[id].roundsPlayed += 1;
         if (aWin) stats[id].wins += 1;
       });
       court.teamB.forEach((id) => {
         if (!stats[id]) return;
-        stats[id].points += court.scoreB + (bWin ? session.winBonus : 0);
+        const bonus = bWin ? session.winBonus : 0;
+        stats[id].gamePts += court.scoreB;
+        stats[id].bonusPts += bonus;
+        stats[id].points += court.scoreB + bonus;
         stats[id].roundsPlayed += 1;
         if (bWin) stats[id].wins += 1;
       });
     });
   });
-  return Object.values(stats).sort((a, b) => b.points - a.points);
+  const sorted = Object.values(stats).sort((a, b) => {
+    if (b.points !== a.points) return b.points - a.points;
+    return b.wins - a.wins;
+  });
+  let rank = 0;
+  sorted.forEach((p, i) => {
+    if (i === 0 || p.points !== sorted[i - 1].points || p.wins !== sorted[i - 1].wins) {
+      rank = i + 1;
+    }
+    p.rank = rank;
+  });
+  return sorted;
+}
+
+function buildShareText(session) {
+  const standings = computeStandings(session);
+  const dateStr = new Date(session.date).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+  const medals = ['🥇', '🥈', '🥉'];
+  const lines = standings.map((p) => {
+    const rank = medals[p.rank - 1] || `${p.rank}.`;
+    return `${rank} ${p.name} — *${p.points}* pts (${p.gamePts} game + ${p.bonusPts} bonus)`;
+  });
+  return `🎾 *PadelMix Standings* — ${dateStr}\n\n${lines.join('\n')}`;
+}
+
+function ensureCycleInfo(session) {
+  if (session.cycleRounds == null) {
+    const total = session.playerIds.length;
+    const courtsUsed = Math.min(session.courts, Math.floor(total / 4));
+    session.cycleRounds = estimateCycleRounds(total, courtsUsed);
+  }
+  return session.cycleRounds;
 }
 
 function suggestTarget(session) {
-  const total = session.playerIds.length;
-  const courtsUsed = Math.min(session.courts, Math.floor(total / 4));
-  const cycleRounds = estimateCycleRounds(total, courtsUsed);
+  const cycleRounds = ensureCycleInfo(session);
   const roundsPlayed = session.rounds.length;
   const elapsedMin = (Date.now() - session.startedAt) / 60000;
   const remainingMin = Math.max(0, session.durationMin - elapsedMin);
@@ -67,8 +102,17 @@ function suggestTarget(session) {
 }
 
 function ensurePendingRound(session) {
+  ensureCycleInfo(session);
   if (!session.pendingRound) {
-    const { target } = suggestTarget(session);
+    const roundNum = session.rounds.length + 1;
+    let target;
+    if (roundNum <= session.cycleRounds) {
+      if (session.cycleTarget == null) session.cycleTarget = suggestTarget(session).target;
+      target = session.cycleTarget;
+    } else {
+      if (session.bonusTarget == null) session.bonusTarget = suggestTarget(session).target;
+      target = session.bonusTarget;
+    }
     const gen = generateNextRound(session.playerIds, session.courts, session.rounds);
     gen.courts.forEach((c) => { c.target = target; });
     session.pendingRound = gen;
@@ -92,38 +136,41 @@ function renderSetup() {
   const el = document.getElementById('screen-setup');
   const s = data.settings;
   el.innerHTML = `
-    <h2>Today's Players</h2>
-    <div id="roster-list" class="roster-list"></div>
-    <form id="add-player-form" class="row">
-      <input id="new-player-name" type="text" placeholder="Add player name" autocomplete="off" />
-      <button type="submit">Add</button>
-    </form>
+    <div class="panel">
+      <h2>Today's Players</h2>
+      <div id="roster-list" class="roster-list"></div>
+      <form id="add-player-form" class="row">
+        <input id="new-player-name" type="text" placeholder="Add player name" autocomplete="off" />
+        <button type="submit">Add</button>
+      </form>
+    </div>
 
-    <h2>Session Settings</h2>
-    <label>Courts available
-      <input id="set-courts" type="number" min="1" value="${s.courts}" />
-    </label>
-    <label>Start time
-      <input id="set-start" type="time" value="${nowTimeStr()}" />
-    </label>
-    <label>Duration (minutes)
-      <input id="set-duration" type="number" min="10" step="5" value="90" />
-    </label>
-    <details>
-      <summary>Advanced</summary>
-      <label>Default point target
-        <input id="set-target" type="number" min="5" value="${s.pointTarget}" />
+    <div class="panel">
+      <h2>Session Settings</h2>
+      <label>Courts available
+        <input id="set-courts" type="number" min="1" value="${s.courts}" />
       </label>
-      <label>Win bonus
-        <input id="set-bonus" type="number" min="0" value="${s.winBonus}" />
+      <label>Start time
+        <input id="set-start" type="time" value="${nowTimeStr()}" />
       </label>
-      <label>Pace (seconds per point)
-        <input id="set-pace" type="number" min="10" value="${s.secPerPoint}" />
+      <label>Duration (minutes)
+        <input id="set-duration" type="number" min="10" step="5" value="90" />
       </label>
-    </details>
-
-    <p id="setup-warning" class="warning"></p>
-    <button id="start-session-btn" class="primary">Start Session</button>
+      <details>
+        <summary>Advanced</summary>
+        <label>Default point target
+          <input id="set-target" type="number" min="5" value="${s.pointTarget}" />
+        </label>
+        <label>Win bonus
+          <input id="set-bonus" type="number" min="0" value="${s.winBonus}" />
+        </label>
+        <label>Pace (seconds per point)
+          <input id="set-pace" type="number" min="10" value="${s.secPerPoint}" />
+        </label>
+      </details>
+      <p id="setup-warning" class="warning"></p>
+      <button id="start-session-btn" class="primary">Start Session</button>
+    </div>
 
     ${renderPastSessions()}
   `;
@@ -218,7 +265,7 @@ function renderPastSessions() {
       return `<li><button class="link view-past" data-id="${s.id}">${d.toLocaleDateString()} — ${s.playerIds.length} players — top: ${top ? top.name : '-'}</button></li>`;
     })
     .join('');
-  return `<h2>Past Sessions</h2><ul class="past-list">${items}</ul>`;
+  return `<div class="panel"><h2>Past Sessions</h2><ul class="past-list">${items}</ul></div>`;
 }
 
 function nowTimeStr() {
@@ -237,6 +284,10 @@ function renderRound() {
   const round = ensurePendingRound(session);
   const info = suggestTarget(session);
   const roundNum = session.rounds.length + 1;
+  const inMainCycle = roundNum <= session.cycleRounds;
+  const rotationLabel = inMainCycle
+    ? `Rotation ${roundNum}/${session.cycleRounds}`
+    : `Bonus round ${roundNum - session.cycleRounds}`;
 
   const courtCards = round.courts
     .map(
@@ -265,13 +316,15 @@ function renderRound() {
     : '';
 
   el.innerHTML = `
-    <h2>Round ${roundNum}</h2>
-    <p class="muted">Elapsed ${Math.round(info.elapsedMin)} / ${session.durationMin} min</p>
-    ${cycleBanner}
-    <label>Target points this round
-      <input id="round-target" type="number" min="5" value="${round.courts[0]?.target ?? info.target}" />
-    </label>
-    <p class="muted">${sitOutText}</p>
+    <div class="panel">
+      <h2>Round ${roundNum} <span class="badge">${rotationLabel}</span></h2>
+      <p class="muted">Elapsed ${Math.round(info.elapsedMin)} / ${session.durationMin} min</p>
+      ${cycleBanner}
+      <label>Target points this round
+        <input id="round-target" type="number" min="5" value="${round.courts[0]?.target ?? info.target}" />
+      </label>
+      <p class="muted">${sitOutText}</p>
+    </div>
     <div class="courts">${courtCards}</div>
     <button id="save-round-btn" class="primary">Save Round &amp; Next</button>
     <button id="end-session-btn" class="secondary">End Session</button>
@@ -279,8 +332,10 @@ function renderRound() {
   `;
 
   document.getElementById('round-target').addEventListener('change', (e) => {
-    const val = parseInt(e.target.value, 10) || info.target;
+    const val = parseInt(e.target.value, 10) || round.courts[0]?.target;
     round.courts.forEach((c) => { c.target = val; });
+    if (inMainCycle) session.cycleTarget = val;
+    else session.bonusTarget = val;
     saveData(data);
   });
 
@@ -330,13 +385,14 @@ function renderStandings() {
 
   const rows = standings
     .map(
-      (p, i) => `
+      (p) => `
     <tr>
-      <td>${i + 1}</td>
+      <td><span class="rank-badge${p.rank <= 3 ? ` rank-${p.rank}` : ''}">${p.rank}</span></td>
       <td>${p.name}</td>
-      <td>${p.points}</td>
+      <td>${p.gamePts}</td>
+      <td>${p.bonusPts}</td>
+      <td><strong>${p.points}</strong></td>
       <td>${p.wins}</td>
-      <td>${p.roundsPlayed}</td>
     </tr>`
     )
     .join('');
@@ -363,16 +419,29 @@ function renderStandings() {
     .join('');
 
   el.innerHTML = `
-    <h2>Standings</h2>
-    <table class="standings-table">
-      <thead><tr><th>#</th><th>Player</th><th>Points</th><th>Wins</th><th>Rounds</th></tr></thead>
-      <tbody>${rows}</tbody>
-    </table>
-    ${isActive ? '<button id="back-to-round-btn" class="primary">Back to Round</button>' : '<button id="back-home-btn" class="primary">Back to Home</button>'}
-    <h2>Round History</h2>
-    <ul class="history-list">${history || '<li class="muted">No rounds played yet.</li>'}</ul>
-    ${history ? '<button id="save-edits-btn" class="secondary">Save Score Edits</button>' : ''}
+    <div class="panel">
+      <h2>Standings</h2>
+      <div class="table-wrap">
+        <table class="standings-table">
+          <thead><tr><th>#</th><th>Player</th><th>Game</th><th>Bonus</th><th>Total</th><th>W</th></tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+      <button id="share-btn" class="whatsapp">📤 Share to WhatsApp</button>
+      ${isActive ? '<button id="back-to-round-btn" class="primary">Back to Round</button>' : '<button id="back-home-btn" class="primary">Back to Home</button>'}
+    </div>
+
+    <div class="panel">
+      <h2>Round History</h2>
+      <ul class="history-list">${history || '<li class="muted">No rounds played yet.</li>'}</ul>
+      ${history ? '<button id="save-edits-btn" class="secondary">Save Score Edits</button>' : ''}
+    </div>
   `;
+
+  document.getElementById('share-btn').addEventListener('click', () => {
+    const text = buildShareText(session);
+    window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, '_blank');
+  });
 
   const backRound = document.getElementById('back-to-round-btn');
   if (backRound) backRound.addEventListener('click', () => { screen = 'round'; render(); });
