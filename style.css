@@ -1,0 +1,223 @@
+:root {
+  --bg: #f5f7f6;
+  --card: #ffffff;
+  --text: #1a2420;
+  --muted: #6b7a75;
+  --primary: #1b6e5c;
+  --primary-dark: #124b3f;
+  --border: #dfe6e3;
+  --warning: #b3261e;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #121816;
+    --card: #1b2422;
+    --text: #eef2f0;
+    --muted: #9fb0aa;
+    --primary: #3fbf9f;
+    --primary-dark: #2a8a70;
+    --border: #2c3835;
+  }
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  padding-bottom: 2rem;
+}
+
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.9rem 1rem;
+  background: var(--primary);
+  color: white;
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+
+.brand { font-weight: 700; font-size: 1.1rem; }
+
+.topbar nav button {
+  background: rgba(255,255,255,0.15);
+  color: white;
+  border: none;
+  padding: 0.5rem 0.8rem;
+  border-radius: 8px;
+  margin-left: 0.4rem;
+  font-size: 0.9rem;
+}
+
+main { max-width: 640px; margin: 0 auto; padding: 1rem; }
+
+.screen { display: none; }
+.screen.active { display: block; }
+
+h2 { font-size: 1.05rem; margin: 1.4rem 0 0.6rem; color: var(--primary-dark); }
+h2:first-child { margin-top: 0.4rem; }
+h3 { margin: 0 0 0.5rem; font-size: 1rem; }
+
+label {
+  display: block;
+  margin: 0.6rem 0;
+  font-size: 0.9rem;
+  color: var(--muted);
+}
+
+input[type=text], input[type=number], input[type=time] {
+  display: block;
+  width: 100%;
+  padding: 0.7rem;
+  margin-top: 0.3rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--card);
+  color: var(--text);
+  font-size: 1rem;
+}
+
+button {
+  font-size: 1rem;
+  padding: 0.75rem 1rem;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--card);
+  color: var(--text);
+  cursor: pointer;
+}
+
+button.primary {
+  background: var(--primary);
+  color: white;
+  border: none;
+  width: 100%;
+  margin-top: 1rem;
+  font-weight: 600;
+}
+
+button.secondary {
+  width: 100%;
+  margin-top: 0.6rem;
+  color: var(--warning);
+}
+
+button.link {
+  background: none;
+  border: none;
+  color: var(--primary);
+  padding: 0.2rem 0;
+  text-decoration: underline;
+  font-size: 0.95rem;
+}
+
+.row { display: flex; gap: 0.5rem; margin: 0.6rem 0; }
+.row input { flex: 1; margin-top: 0; }
+.row button { flex-shrink: 0; }
+
+.roster-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.roster-item {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 0.5rem 0.9rem;
+  margin: 0;
+  font-size: 0.95rem;
+  color: var(--text);
+}
+
+.roster-item input { width: auto; }
+
+details { margin-top: 0.6rem; }
+summary { cursor: pointer; color: var(--muted); font-size: 0.9rem; }
+
+.muted { color: var(--muted); font-size: 0.9rem; }
+.warning { color: var(--warning); font-weight: 600; min-height: 1.2em; }
+
+.banner {
+  background: #fff3cd;
+  color: #6b4e00;
+  border-radius: 8px;
+  padding: 0.7rem;
+  font-size: 0.9rem;
+}
+
+.courts { display: flex; flex-direction: column; gap: 0.8rem; margin-top: 0.8rem; }
+
+.court-card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 1rem;
+}
+
+.team {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+  padding: 0.3rem 0;
+}
+
+.team span { font-size: 0.95rem; }
+.team input { width: 4.5rem; margin-top: 0; text-align: center; }
+
+.vs { text-align: center; color: var(--muted); font-size: 0.8rem; margin: 0.2rem 0; }
+
+.standings-table {
+  width: 100%;
+  border-collapse: collapse;
+  background: var(--card);
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.standings-table th, .standings-table td {
+  padding: 0.6rem 0.5rem;
+  text-align: left;
+  border-bottom: 1px solid var(--border);
+  font-size: 0.92rem;
+}
+
+.history-list { list-style: none; padding: 0; }
+
+.history-round {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 0.7rem 0.9rem;
+  margin-bottom: 0.6rem;
+}
+
+.history-court {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.85rem;
+  margin-top: 0.3rem;
+  flex-wrap: wrap;
+}
+
+.history-court .edit-score {
+  width: 3.2rem;
+  padding: 0.3rem;
+  margin: 0;
+  text-align: center;
+}
+
+.past-list { list-style: none; padding: 0; }
+.past-list li { margin-bottom: 0.4rem; }

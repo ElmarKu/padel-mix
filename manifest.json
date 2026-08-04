@@ -1,0 +1,9 @@
+{
+  "name": "PadelMix",
+  "short_name": "PadelMix",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "background_color": "#f5f7f6",
+  "theme_color": "#1b6e5c",
+  "icons": []
+}
