@@ -1,21 +1,39 @@
-import { loadData, saveData, uid } from './state.js';
+import { loadData, saveData, uid, DEFAULT_SETTINGS } from './state.js';
 import { generateNextRound, estimateCycleRounds } from './rotation.js';
 import { renderBarChart, renderLineChart } from './charts.js';
 
 let data = loadData();
-let screen = 'setup';
-let selectedIds = new Set(
-  data.sessions.length
-    ? data.sessions[data.sessions.length - 1].playerIds.filter((id) => data.players.some((p) => p.id === id))
-    : data.players.map((p) => p.id)
-);
+saveData(data);
+let screen = 'groups';
+let selectedIds = new Set();
 let viewingSessionId = null;
 let renamingPlayerId = null;
+let renamingGroupId = null;
 
 const root = document.getElementById('app');
 
+function activeGroup() {
+  if (data.activeGroupId) {
+    const g = data.groups.find((x) => x.id === data.activeGroupId);
+    if (g) return g;
+  }
+  if (data.groups.length === 1) {
+    data.activeGroupId = data.groups[0].id;
+    saveData(data);
+    return data.groups[0];
+  }
+  return null;
+}
+
+function lastSessionSelection(group) {
+  if (!group.sessions.length) return new Set(group.players.map((p) => p.id));
+  const last = group.sessions[group.sessions.length - 1];
+  return new Set(last.playerIds.filter((id) => group.players.some((p) => p.id === id)));
+}
+
 function getPlayer(id) {
-  return data.players.find((p) => p.id === id);
+  const g = activeGroup();
+  return g && g.players.find((p) => p.id === id);
 }
 function getName(id) {
   return getPlayer(id)?.name || 'Unknown';
@@ -27,7 +45,8 @@ function getNameHtml(id) {
   return escapeHtml(getName(id));
 }
 function activeSession() {
-  return data.sessions.find((s) => !s.ended) || null;
+  const g = activeGroup();
+  return g ? g.sessions.find((s) => !s.ended) || null : null;
 }
 function clamp(n, min, max) {
   return Math.max(min, Math.min(max, n));
@@ -84,15 +103,15 @@ function computeStandings(session) {
   return assignRanks(sorted);
 }
 
-function computeAllTimeStats() {
-  const endedSessions = data.sessions
+function computeAllTimeStats(group) {
+  const endedSessions = group.sessions
     .filter((s) => s.ended)
     .slice()
     .sort((a, b) => new Date(a.date) - new Date(b.date));
 
   const perPlayer = {};
   const perSessionPoints = {};
-  data.players.forEach((p) => {
+  group.players.forEach((p) => {
     perPlayer[p.id] = { id: p.id, name: p.name, points: 0, gamePts: 0, bonusPts: 0, wins: 0, roundsPlayed: 0, sessions: 0 };
     perSessionPoints[p.id] = new Array(endedSessions.length).fill(null);
   });
@@ -182,22 +201,132 @@ function ensurePendingRound(session) {
 }
 
 function render() {
+  const group = activeGroup();
+
+  const groupBar = document.getElementById('group-bar');
+  if (group && screen !== 'groups') {
+    groupBar.style.display = 'flex';
+    document.getElementById('group-bar-name').textContent = group.name;
+  } else {
+    groupBar.style.display = 'none';
+  }
+
   root.querySelectorAll('.screen').forEach((el) => el.classList.remove('active'));
   document.getElementById(`screen-${screen}`).classList.add('active');
   document.getElementById('nav-standings').style.display =
-    activeSession() || data.sessions.length ? 'inline-block' : 'none';
+    group && (activeSession() || group.sessions.length) ? 'inline-block' : 'none';
   document.getElementById('nav-history').style.display =
-    data.sessions.some((s) => s.ended) ? 'inline-block' : 'none';
+    group && group.sessions.some((s) => s.ended) ? 'inline-block' : 'none';
 
+  if (screen === 'groups') renderGroups();
   if (screen === 'setup') renderSetup();
   if (screen === 'round') renderRound();
   if (screen === 'standings') renderStandings();
   if (screen === 'history') renderHistory();
 }
 
+function renderGroups() {
+  const el = document.getElementById('screen-groups');
+  const rows = data.groups
+    .map((g) => {
+      if (g.id === renamingGroupId) {
+        return `
+        <li class="past-list-item">
+          <input type="text" class="rename-input group-rename-input" data-id="${g.id}" value="${escapeHtml(g.name)}" />
+        </li>`;
+      }
+      return `
+      <li class="past-list-item">
+        <button class="link select-group" data-id="${g.id}">${escapeHtml(g.name)}</button>
+        <button type="button" class="rename-btn" data-id="${g.id}" aria-label="Rename ${escapeHtml(g.name)}">✏️</button>
+        <button type="button" class="delete-session-btn" data-id="${g.id}" aria-label="Delete ${escapeHtml(g.name)}">🗑️</button>
+      </li>`;
+    })
+    .join('');
+
+  el.innerHTML = `
+    <div class="panel">
+      <h2>Your Groups</h2>
+      <ul class="past-list">${rows}</ul>
+      ${data.groups.length ? '' : '<p class="muted">No groups yet — create one below.</p>'}
+      <form id="add-group-form" class="row">
+        <input id="new-group-name" type="text" placeholder="Group name" autocomplete="off" />
+        <button type="submit">Add</button>
+      </form>
+    </div>
+  `;
+
+  el.querySelectorAll('.select-group').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const group = data.groups.find((g) => g.id === btn.dataset.id);
+      if (!group) return;
+      data.activeGroupId = group.id;
+      selectedIds = lastSessionSelection(group);
+      viewingSessionId = null;
+      saveData(data);
+      screen = activeSession() ? 'round' : 'setup';
+      render();
+    });
+  });
+
+  el.querySelectorAll('.rename-btn').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      renamingGroupId = btn.dataset.id;
+      render();
+    });
+  });
+
+  const renameInput = el.querySelector('.group-rename-input');
+  if (renameInput) {
+    renameInput.focus();
+    renameInput.select();
+    const commit = () => {
+      const name = renameInput.value.trim();
+      const group = data.groups.find((g) => g.id === renameInput.dataset.id);
+      if (name && group) group.name = name;
+      renamingGroupId = null;
+      saveData(data);
+      render();
+    };
+    renameInput.addEventListener('blur', commit);
+    renameInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') renameInput.blur();
+      if (e.key === 'Escape') { renamingGroupId = null; render(); }
+    });
+  }
+
+  el.querySelectorAll('.delete-session-btn').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const group = data.groups.find((g) => g.id === btn.dataset.id);
+      if (!group) return;
+      if (!confirm(`Delete group "${group.name}" and all its players, sessions, and history? This can't be undone.`)) return;
+      data.groups = data.groups.filter((g) => g.id !== group.id);
+      if (data.activeGroupId === group.id) data.activeGroupId = null;
+      saveData(data);
+      render();
+    });
+  });
+
+  document.getElementById('add-group-form').addEventListener('submit', (e) => {
+    e.preventDefault();
+    const input = document.getElementById('new-group-name');
+    const name = input.value.trim();
+    if (!name) return;
+    data.groups.push({ id: uid(), name, players: [], settings: { ...DEFAULT_SETTINGS }, sessions: [] });
+    saveData(data);
+    render();
+  });
+}
+
 function renderSetup() {
+  const group = activeGroup();
+  if (!group) {
+    screen = 'groups';
+    render();
+    return;
+  }
   const el = document.getElementById('screen-setup');
-  const s = data.settings;
+  const s = group.settings;
   el.innerHTML = `
     <div class="panel">
       <h2>Today's Players</h2>
@@ -236,11 +365,11 @@ function renderSetup() {
       <button id="start-session-btn" class="primary">Start Session</button>
     </div>
 
-    ${renderPastSessions()}
+    ${renderPastSessions(group)}
   `;
 
   const rosterList = document.getElementById('roster-list');
-  rosterList.innerHTML = data.players
+  rosterList.innerHTML = group.players
     .map((p) => {
       if (p.id === renamingPlayerId) {
         return `
@@ -305,11 +434,11 @@ function renderSetup() {
   el.querySelectorAll('.delete-session-btn').forEach((btn) => {
     btn.addEventListener('click', (e) => {
       e.stopPropagation();
-      const session = data.sessions.find((s) => s.id === btn.dataset.id);
+      const session = group.sessions.find((s) => s.id === btn.dataset.id);
       if (!session) return;
       const d = new Date(session.date).toLocaleDateString();
       if (!confirm(`Delete the session from ${d}? This can't be undone.`)) return;
-      data.sessions = data.sessions.filter((s) => s.id !== btn.dataset.id);
+      group.sessions = group.sessions.filter((s) => s.id !== btn.dataset.id);
       saveData(data);
       renderSetup();
     });
@@ -321,7 +450,7 @@ function renderSetup() {
     const name = input.value.trim();
     if (!name) return;
     const id = uid();
-    data.players.push({ id, name });
+    group.players.push({ id, name });
     selectedIds.add(id);
     saveData(data);
     renderSetup();
@@ -343,7 +472,7 @@ function renderSetup() {
     }
     warning.textContent = '';
 
-    data.settings = { courts, pointTarget, winBonus, secPerPoint };
+    group.settings = { courts, pointTarget, winBonus, secPerPoint };
     const session = {
       id: uid(),
       date: new Date().toISOString(),
@@ -359,15 +488,15 @@ function renderSetup() {
       startedAt: Date.now(),
       ended: false,
     };
-    data.sessions.push(session);
+    group.sessions.push(session);
     saveData(data);
     screen = 'round';
     render();
   });
 }
 
-function renderPastSessions() {
-  const past = data.sessions.filter((s) => s.ended);
+function renderPastSessions(group) {
+  const past = group.sessions.filter((s) => s.ended);
   if (!past.length) return '';
   const items = past
     .slice()
@@ -391,10 +520,11 @@ function nowTimeStr() {
 }
 
 function renderRound() {
+  const group = activeGroup();
   const session = activeSession();
   const el = document.getElementById('screen-round');
-  if (!session) {
-    screen = 'setup';
+  if (!group || !session) {
+    screen = group ? 'setup' : 'groups';
     render();
     return;
   }
@@ -491,8 +621,14 @@ function renderRound() {
 }
 
 function renderStandings() {
-  const session = data.sessions.find((s) => s.id === viewingSessionId) || activeSession();
+  const group = activeGroup();
   const el = document.getElementById('screen-standings');
+  if (!group) {
+    screen = 'groups';
+    render();
+    return;
+  }
+  const session = group.sessions.find((s) => s.id === viewingSessionId) || activeSession();
   if (!session) {
     el.innerHTML = '<p class="muted">No session yet.</p>';
     return;
@@ -583,8 +719,14 @@ function renderStandings() {
 }
 
 function renderHistory() {
+  const group = activeGroup();
   const el = document.getElementById('screen-history');
-  const { leaderboard, endedSessions, perSessionPoints } = computeAllTimeStats();
+  if (!group) {
+    screen = 'groups';
+    render();
+    return;
+  }
+  const { leaderboard, endedSessions, perSessionPoints } = computeAllTimeStats(group);
 
   if (!leaderboard.length) {
     el.innerHTML = '<div class="panel"><h2>All-Time History</h2><p class="muted">No completed sessions yet.</p></div>';
@@ -663,11 +805,14 @@ function renderHistory() {
 
 document.getElementById('nav-home').addEventListener('click', () => {
   viewingSessionId = null;
-  screen = activeSession() ? 'round' : 'setup';
+  const group = activeGroup();
+  screen = group ? (activeSession() ? 'round' : 'setup') : 'groups';
   render();
 });
 document.getElementById('nav-standings').addEventListener('click', () => {
-  if (!viewingSessionId) viewingSessionId = activeSession()?.id || (data.sessions[data.sessions.length - 1]?.id ?? null);
+  const group = activeGroup();
+  if (!group) return;
+  if (!viewingSessionId) viewingSessionId = activeSession()?.id || (group.sessions[group.sessions.length - 1]?.id ?? null);
   screen = 'standings';
   render();
 });
@@ -675,6 +820,21 @@ document.getElementById('nav-history').addEventListener('click', () => {
   screen = 'history';
   render();
 });
+document.getElementById('group-bar-switch').addEventListener('click', () => {
+  viewingSessionId = null;
+  screen = 'groups';
+  render();
+});
 
-screen = activeSession() ? 'round' : 'setup';
+function initScreen() {
+  const group = activeGroup();
+  if (group) {
+    selectedIds = lastSessionSelection(group);
+    screen = activeSession() ? 'round' : 'setup';
+  } else {
+    screen = 'groups';
+  }
+}
+
+initScreen();
 render();

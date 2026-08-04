@@ -104,6 +104,29 @@ body {
 
 .topbar nav button:active { background: rgba(255, 255, 255, 0.3); }
 
+.group-bar {
+  display: none;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+  padding: 0.5rem 1.1rem;
+  background: var(--surface-alt);
+  border-bottom: 1px solid var(--border);
+}
+
+.group-bar #group-bar-name {
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: var(--primary-dark);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.group-bar .link { flex-shrink: 0; font-size: 0.85rem; }
+
+.rename-input.group-rename-input { flex: 1; width: auto; margin: 0; }
+
 main { max-width: 640px; margin: 0 auto; padding: 1.1rem; }
 
 .screen { display: none; }
