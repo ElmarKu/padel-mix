@@ -159,6 +159,18 @@ input[type=text]:focus, input[type=number]:focus, input[type=time]:focus {
   box-shadow: 0 0 0 3px var(--primary-soft);
 }
 
+/* iOS Safari sizes input[type=time] to its native control's intrinsic
+   width and ignores width:100%; the flex + min-width:0 forces it to shrink. */
+.time-field {
+  display: flex;
+  flex-direction: column;
+}
+.time-field input[type=time] {
+  min-width: 0;
+  max-width: 100%;
+  flex: 1 1 auto;
+}
+
 button {
   font-size: 0.98rem;
   padding: 0.8rem 1.1rem;

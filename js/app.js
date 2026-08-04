@@ -210,7 +210,7 @@ function renderSetup() {
 
     <div class="panel">
       <h2>Session Settings</h2>
-      <label>Start time
+      <label class="time-field">Start time
         <input id="set-start" type="time" value="${nowTimeStr()}" />
       </label>
       <label>Duration (minutes)
