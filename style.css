@@ -160,7 +160,9 @@ input[type=text]:focus, input[type=number]:focus, input[type=time]:focus {
 }
 
 /* iOS Safari sizes input[type=time] to its native control's intrinsic
-   width and ignores width:100%; the flex + min-width:0 forces it to shrink. */
+   width and ignores width:100%, even inside a shrinking flex item.
+   Stripping the native appearance is what actually makes it respect
+   the box model, at the cost of the OS-styled chrome. */
 .time-field {
   display: flex;
   flex-direction: column;
@@ -168,7 +170,11 @@ input[type=text]:focus, input[type=number]:focus, input[type=time]:focus {
 .time-field input[type=time] {
   min-width: 0;
   max-width: 100%;
+  width: 100%;
   flex: 1 1 auto;
+  -webkit-appearance: none;
+  appearance: none;
+  box-sizing: border-box;
 }
 
 button {
