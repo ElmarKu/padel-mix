@@ -168,33 +168,97 @@ function ensureCycleInfo(session) {
   return session.cycleRounds;
 }
 
-function suggestTarget(session) {
+// A "Round" is one full rotation cycle (everyone paired with everyone, once);
+// a "Game" is a single match within that cycle. Round 2+ replays the exact
+// same schedule of games as Round 1 rather than generating fresh pairings.
+function roundProgress(session) {
   const cycleRounds = ensureCycleInfo(session);
-  const roundsPlayed = session.rounds.length;
-  const elapsedMin = (Date.now() - session.startedAt) / 60000;
-  const remainingMin = Math.max(0, session.durationMin - elapsedMin);
-  const cycleComplete = roundsPlayed >= cycleRounds;
-  const roundsLeft = cycleComplete ? 1 : Math.max(1, cycleRounds - roundsPlayed);
-  const avgMinPerRound = remainingMin / roundsLeft;
-  const target = clamp(Math.round((avgMinPerRound * 60) / session.secPerPoint), 8, 40);
-  return { target, cycleComplete, cycleRounds, remainingMin, elapsedMin };
+  const gamesPlayed = session.rounds.length;
+  const roundNum = Math.floor(gamesPlayed / cycleRounds) + 1;
+  const gameInRound = (gamesPlayed % cycleRounds) + 1;
+  return { cycleRounds, roundNum, gameInRound, isFirstGameOfRound: gameInRound === 1 };
+}
+
+function ensureSchedule(session) {
+  if (!session.schedule) {
+    // Backfill from any games already played this cycle (e.g. an in-progress
+    // session from before this feature existed), so we don't lose an
+    // already-established schedule.
+    session.schedule = session.rounds.slice(0, session.cycleRounds).map((r) => ({
+      courts: r.courts.map((c) => ({ court: c.court, teamA: c.teamA, teamB: c.teamB })),
+      sitOuts: r.sitOuts,
+    }));
+  }
+  return session.schedule;
+}
+
+// The configured "Start time" + duration define the real-world court-booking
+// window; used for the forward-looking "time left" budget. Separate from
+// session.startedAt (the actual moment "Start Session" was tapped), which is
+// used only to measure how long play has actually taken for pace purposes.
+function configuredStartMs(session) {
+  const [h, m] = String(session.startLabel || '').split(':').map(Number);
+  const d = new Date(session.date);
+  if (!Number.isNaN(h) && !Number.isNaN(m)) d.setHours(h, m, 0, 0);
+  return d.getTime();
+}
+
+function timeLeftMin(session) {
+  const endMs = configuredStartMs(session) + session.durationMin * 60000;
+  return Math.max(0, (endMs - Date.now()) / 60000);
+}
+
+function elapsedMin(session) {
+  return Math.max(0, (Date.now() - configuredStartMs(session)) / 60000);
+}
+
+// Empirical seconds-per-point measured from real play, cumulative across all
+// fully-completed Rounds so far -- replaces guessing a fixed pace up front.
+function cumulativePaceSecPerPoint(session, roundsCompleted) {
+  if (roundsCompleted < 1 || !session.roundEndTimestamps?.[roundsCompleted - 1]) return null;
+  const totalSeconds = (session.roundEndTimestamps[roundsCompleted - 1] - session.startedAt) / 1000;
+  const gamesCompleted = roundsCompleted * session.cycleRounds;
+  let totalPoints = 0;
+  for (let i = 0; i < gamesCompleted; i++) {
+    session.rounds[i].courts.forEach((c) => { totalPoints += (c.scoreA || 0) + (c.scoreB || 0); });
+  }
+  return totalPoints > 0 ? totalSeconds / totalPoints : null;
+}
+
+function suggestTarget(session) {
+  const { roundNum, cycleRounds } = roundProgress(session);
+  const remainingMin = timeLeftMin(session);
+  if (roundNum === 1) {
+    return { target: 15, remainingMin, elapsedMin: elapsedMin(session) };
+  }
+  const pace = cumulativePaceSecPerPoint(session, roundNum - 1) || 45;
+  const avgSecondsPerGame = (remainingMin * 60) / cycleRounds;
+  const target = clamp(Math.round(avgSecondsPerGame / pace), 8, 40);
+  return { target, remainingMin, elapsedMin: elapsedMin(session) };
 }
 
 function ensurePendingRound(session) {
-  ensureCycleInfo(session);
+  const { roundNum, gameInRound } = roundProgress(session);
   if (!session.pendingRound) {
-    const roundNum = session.rounds.length + 1;
-    let target;
-    if (roundNum <= session.cycleRounds) {
-      if (session.cycleTarget == null) session.cycleTarget = suggestTarget(session).target;
-      target = session.cycleTarget;
-    } else {
-      if (session.bonusTarget == null) session.bonusTarget = suggestTarget(session).target;
-      target = session.bonusTarget;
+    const schedule = ensureSchedule(session);
+    const scheduleIndex = gameInRound - 1;
+    let plan = schedule[scheduleIndex];
+    if (!plan) {
+      const gen = generateNextRound(session.playerIds, session.courts, schedule);
+      plan = { courts: gen.courts.map((c) => ({ court: c.court, teamA: c.teamA, teamB: c.teamB })), sitOuts: gen.sitOuts };
+      schedule[scheduleIndex] = plan;
     }
-    const gen = generateNextRound(session.playerIds, session.courts, session.rounds);
-    gen.courts.forEach((c) => { c.target = target; });
-    session.pendingRound = gen;
+
+    if (!session.roundTargets) session.roundTargets = [];
+    if (session.roundTargets[roundNum - 1] == null) {
+      session.roundTargets[roundNum - 1] = suggestTarget(session).target;
+    }
+    const target = session.roundTargets[roundNum - 1];
+
+    session.pendingRound = {
+      courts: plan.courts.map((c) => ({ ...c, target, scoreA: null, scoreB: null })),
+      sitOuts: plan.sitOuts,
+    };
     saveData(data);
   }
   return session.pendingRound;
@@ -351,14 +415,8 @@ function renderSetup() {
           <input id="set-courts" type="number" min="1" value="${suggestedCourts(selectedIds.size)}" />
         </label>
         <p class="muted courts-hint">Auto: 1 court for 1–7 players, 2 for 8–11, +1 court per 4 more. Edit to override.</p>
-        <label>Default point target
-          <input id="set-target" type="number" min="5" value="${s.pointTarget}" />
-        </label>
         <label>Win bonus
           <input id="set-bonus" type="number" min="0" value="${s.winBonus}" />
-        </label>
-        <label>Pace (seconds per point)
-          <input id="set-pace" type="number" min="10" value="${s.secPerPoint}" />
         </label>
       </details>
       <p id="setup-warning" class="warning"></p>
@@ -460,9 +518,7 @@ function renderSetup() {
     const courts = parseInt(document.getElementById('set-courts').value, 10) || 1;
     const durationMin = parseInt(document.getElementById('set-duration').value, 10) || 60;
     const startLabel = document.getElementById('set-start').value;
-    const pointTarget = parseInt(document.getElementById('set-target').value, 10) || 21;
     const winBonus = parseInt(document.getElementById('set-bonus').value, 10) || 0;
-    const secPerPoint = parseInt(document.getElementById('set-pace').value, 10) || 45;
     const playerIds = [...selectedIds];
 
     const warning = document.getElementById('setup-warning');
@@ -472,16 +528,14 @@ function renderSetup() {
     }
     warning.textContent = '';
 
-    group.settings = { courts, pointTarget, winBonus, secPerPoint };
+    group.settings = { courts, winBonus };
     const session = {
       id: uid(),
       date: new Date().toISOString(),
       startLabel,
       durationMin,
       courts,
-      pointTarget,
       winBonus,
-      secPerPoint,
       playerIds,
       rounds: [],
       pendingRound: null,
@@ -529,12 +583,8 @@ function renderRound() {
     return;
   }
   const round = ensurePendingRound(session);
+  const { cycleRounds, roundNum, gameInRound, isFirstGameOfRound } = roundProgress(session);
   const info = suggestTarget(session);
-  const roundNum = session.rounds.length + 1;
-  const inMainCycle = roundNum <= session.cycleRounds;
-  const rotationLabel = inMainCycle
-    ? `Rotation ${roundNum}/${session.cycleRounds}`
-    : `Bonus round ${roundNum - session.cycleRounds}`;
 
   const courtCards = round.courts
     .map(
@@ -558,15 +608,15 @@ function renderRound() {
     ? `Sitting out: ${round.sitOuts.map(getNameHtml).join(', ')}`
     : '';
 
-  const cycleBanner = info.cycleComplete
-    ? `<p class="banner">Full rotation complete! ~${Math.round(info.remainingMin)} min left — play a bonus round or end the session.</p>`
+  const roundBanner = isFirstGameOfRound && roundNum > 1
+    ? `<p class="banner">Round ${roundNum - 1} complete! Round ${roundNum} repeats the same matchups, ~${Math.round(info.remainingMin)} min left.</p>`
     : '';
 
   el.innerHTML = `
     <div class="panel">
-      <h2>Round ${roundNum} <span class="badge">${rotationLabel}</span></h2>
+      <h2>Round ${roundNum} <span class="badge">Game ${gameInRound}/${cycleRounds}</span></h2>
       <p class="muted">Elapsed ${Math.round(info.elapsedMin)} / ${session.durationMin} min</p>
-      ${cycleBanner}
+      ${roundBanner}
       <label>Target points this round
         <input id="round-target" type="number" min="5" value="${round.courts[0]?.target ?? info.target}" />
       </label>
@@ -581,8 +631,7 @@ function renderRound() {
   document.getElementById('round-target').addEventListener('change', (e) => {
     const val = parseInt(e.target.value, 10) || round.courts[0]?.target;
     round.courts.forEach((c) => { c.target = val; });
-    if (inMainCycle) session.cycleTarget = val;
-    else session.bonusTarget = val;
+    session.roundTargets[roundNum - 1] = val;
     saveData(data);
   });
 
@@ -606,6 +655,10 @@ function renderRound() {
     });
     session.rounds.push(round);
     session.pendingRound = null;
+    if (session.rounds.length % session.cycleRounds === 0) {
+      if (!session.roundEndTimestamps) session.roundEndTimestamps = [];
+      session.roundEndTimestamps.push(Date.now());
+    }
     saveData(data);
     render();
   });
@@ -648,11 +701,12 @@ function renderStandings() {
     )
     .join('');
 
+  const cycleRounds = ensureCycleInfo(session);
   const history = session.rounds
     .map(
       (r, idx) => `
     <li class="history-round">
-      <strong>Round ${idx + 1}</strong>
+      <strong>Round ${Math.floor(idx / cycleRounds) + 1} · Game ${(idx % cycleRounds) + 1}</strong>
       ${r.courts
         .map(
           (c) => `

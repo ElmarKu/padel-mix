@@ -2,9 +2,7 @@ const STORAGE_KEY = 'padelmix_data_v1';
 
 const DEFAULT_SETTINGS = {
   courts: 2,
-  pointTarget: 21,
   winBonus: 3,
-  secPerPoint: 45,
 };
 
 function uid() {
