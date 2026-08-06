@@ -214,6 +214,13 @@ function elapsedMin(session) {
 
 // Empirical seconds-per-point measured from real play, cumulative across all
 // fully-completed Rounds so far -- replaces guessing a fixed pace up front.
+// A floor on the measured pace protects against a small, noisy sample (only
+// a few games) skewing the suggestion to an extreme -- most commonly seen
+// when testing by entering scores back-to-back with no real time passing.
+// No ceiling: a genuinely slow-paced group should get a lower target so they
+// can actually finish in time, and that's correct, not noise.
+const MIN_SEC_PER_POINT = 15;
+
 function cumulativePaceSecPerPoint(session, roundsCompleted) {
   if (roundsCompleted < 1 || !session.roundEndTimestamps?.[roundsCompleted - 1]) return null;
   const totalSeconds = (session.roundEndTimestamps[roundsCompleted - 1] - session.startedAt) / 1000;
@@ -222,7 +229,7 @@ function cumulativePaceSecPerPoint(session, roundsCompleted) {
   for (let i = 0; i < gamesCompleted; i++) {
     session.rounds[i].courts.forEach((c) => { totalPoints += (c.scoreA || 0) + (c.scoreB || 0); });
   }
-  return totalPoints > 0 ? totalSeconds / totalPoints : null;
+  return totalPoints > 0 ? Math.max(MIN_SEC_PER_POINT, totalSeconds / totalPoints) : null;
 }
 
 function suggestTarget(session) {
